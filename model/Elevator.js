@@ -93,4 +93,13 @@ export default class Elevator {
       throw ('Invalid Floor:' + targetFloor);
     }
   }
+
+  /**
+   * For Testing Purposes... Force Set A Current Floor
+   */
+  set currentFloor(currentFloorSet) {
+    if (currentFloorSet <= this._topFloor) {
+      this._currentFloor = currentFloorSet;
+    }
+  }
 }

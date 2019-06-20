@@ -1,4 +1,4 @@
-import {Subject} from 'rxjs';
+import {ReplaySubject} from 'rxjs';
 
 /**
  * Represents A Request To Any Subscribed Elevators
@@ -12,7 +12,7 @@ export default class ElevatorRequest {
   constructor(sourceFloor, targetFloor) {
     this._sourceFloor = sourceFloor;
     this._targetFloor = targetFloor;
-    this._commSubject = new Subject();
+    this._commSubject = new ReplaySubject();
   }
 
   /**

@@ -1624,6 +1624,11 @@ function from(input, scheduler) {
     }
 }
 
+/** PURE_IMPORTS_START _isArray PURE_IMPORTS_END */
+function isNumeric(val) {
+    return !isArray(val) && (val - parseFloat(val) + 1) >= 0;
+}
+
 /** PURE_IMPORTS_START _Observable,_from,_util_isArray,_empty PURE_IMPORTS_END */
 function onErrorResumeNext() {
     var sources = [];
@@ -1646,6 +1651,252 @@ function onErrorResumeNext() {
         });
     });
 }
+
+/** PURE_IMPORTS_START _Observable,_scheduler_async,_util_isNumeric,_util_isScheduler PURE_IMPORTS_END */
+function timer(dueTime, periodOrScheduler, scheduler) {
+    if (dueTime === void 0) {
+        dueTime = 0;
+    }
+    var period = -1;
+    if (isNumeric(periodOrScheduler)) {
+        period = Number(periodOrScheduler) < 1 && 1 || Number(periodOrScheduler);
+    }
+    else if (isScheduler(periodOrScheduler)) {
+        scheduler = periodOrScheduler;
+    }
+    if (!isScheduler(scheduler)) {
+        scheduler = async;
+    }
+    return new Observable(function (subscriber) {
+        var due = isNumeric(dueTime)
+            ? dueTime
+            : (+dueTime - scheduler.now());
+        return scheduler.schedule(dispatch$1, due, {
+            index: 0, period: period, subscriber: subscriber
+        });
+    });
+}
+function dispatch$1(state) {
+    var index = state.index, period = state.period, subscriber = state.subscriber;
+    subscriber.next(index);
+    if (subscriber.closed) {
+        return;
+    }
+    else if (period === -1) {
+        return subscriber.complete();
+    }
+    state.index = index + 1;
+    this.schedule(state, period);
+}
+
+/** PURE_IMPORTS_START tslib,_fromArray,_util_isArray,_Subscriber,_OuterSubscriber,_util_subscribeToResult,_.._internal_symbol_iterator PURE_IMPORTS_END */
+function zip() {
+    var observables = [];
+    for (var _i = 0; _i < arguments.length; _i++) {
+        observables[_i] = arguments[_i];
+    }
+    var resultSelector = observables[observables.length - 1];
+    if (typeof resultSelector === 'function') {
+        observables.pop();
+    }
+    return fromArray(observables, undefined).lift(new ZipOperator(resultSelector));
+}
+var ZipOperator = /*@__PURE__*/ (function () {
+    function ZipOperator(resultSelector) {
+        this.resultSelector = resultSelector;
+    }
+    ZipOperator.prototype.call = function (subscriber, source) {
+        return source.subscribe(new ZipSubscriber(subscriber, this.resultSelector));
+    };
+    return ZipOperator;
+}());
+var ZipSubscriber = /*@__PURE__*/ (function (_super) {
+    __extends(ZipSubscriber, _super);
+    function ZipSubscriber(destination, resultSelector, values) {
+        if (values === void 0) {
+            values = Object.create(null);
+        }
+        var _this = _super.call(this, destination) || this;
+        _this.iterators = [];
+        _this.active = 0;
+        _this.resultSelector = (typeof resultSelector === 'function') ? resultSelector : null;
+        _this.values = values;
+        return _this;
+    }
+    ZipSubscriber.prototype._next = function (value) {
+        var iterators = this.iterators;
+        if (isArray(value)) {
+            iterators.push(new StaticArrayIterator(value));
+        }
+        else if (typeof value[iterator] === 'function') {
+            iterators.push(new StaticIterator(value[iterator]()));
+        }
+        else {
+            iterators.push(new ZipBufferIterator(this.destination, this, value));
+        }
+    };
+    ZipSubscriber.prototype._complete = function () {
+        var iterators = this.iterators;
+        var len = iterators.length;
+        this.unsubscribe();
+        if (len === 0) {
+            this.destination.complete();
+            return;
+        }
+        this.active = len;
+        for (var i = 0; i < len; i++) {
+            var iterator = iterators[i];
+            if (iterator.stillUnsubscribed) {
+                var destination = this.destination;
+                destination.add(iterator.subscribe(iterator, i));
+            }
+            else {
+                this.active--;
+            }
+        }
+    };
+    ZipSubscriber.prototype.notifyInactive = function () {
+        this.active--;
+        if (this.active === 0) {
+            this.destination.complete();
+        }
+    };
+    ZipSubscriber.prototype.checkIterators = function () {
+        var iterators = this.iterators;
+        var len = iterators.length;
+        var destination = this.destination;
+        for (var i = 0; i < len; i++) {
+            var iterator = iterators[i];
+            if (typeof iterator.hasValue === 'function' && !iterator.hasValue()) {
+                return;
+            }
+        }
+        var shouldComplete = false;
+        var args = [];
+        for (var i = 0; i < len; i++) {
+            var iterator = iterators[i];
+            var result = iterator.next();
+            if (iterator.hasCompleted()) {
+                shouldComplete = true;
+            }
+            if (result.done) {
+                destination.complete();
+                return;
+            }
+            args.push(result.value);
+        }
+        if (this.resultSelector) {
+            this._tryresultSelector(args);
+        }
+        else {
+            destination.next(args);
+        }
+        if (shouldComplete) {
+            destination.complete();
+        }
+    };
+    ZipSubscriber.prototype._tryresultSelector = function (args) {
+        var result;
+        try {
+            result = this.resultSelector.apply(this, args);
+        }
+        catch (err) {
+            this.destination.error(err);
+            return;
+        }
+        this.destination.next(result);
+    };
+    return ZipSubscriber;
+}(Subscriber));
+var StaticIterator = /*@__PURE__*/ (function () {
+    function StaticIterator(iterator) {
+        this.iterator = iterator;
+        this.nextResult = iterator.next();
+    }
+    StaticIterator.prototype.hasValue = function () {
+        return true;
+    };
+    StaticIterator.prototype.next = function () {
+        var result = this.nextResult;
+        this.nextResult = this.iterator.next();
+        return result;
+    };
+    StaticIterator.prototype.hasCompleted = function () {
+        var nextResult = this.nextResult;
+        return nextResult && nextResult.done;
+    };
+    return StaticIterator;
+}());
+var StaticArrayIterator = /*@__PURE__*/ (function () {
+    function StaticArrayIterator(array) {
+        this.array = array;
+        this.index = 0;
+        this.length = 0;
+        this.length = array.length;
+    }
+    StaticArrayIterator.prototype[iterator] = function () {
+        return this;
+    };
+    StaticArrayIterator.prototype.next = function (value) {
+        var i = this.index++;
+        var array = this.array;
+        return i < this.length ? { value: array[i], done: false } : { value: null, done: true };
+    };
+    StaticArrayIterator.prototype.hasValue = function () {
+        return this.array.length > this.index;
+    };
+    StaticArrayIterator.prototype.hasCompleted = function () {
+        return this.array.length === this.index;
+    };
+    return StaticArrayIterator;
+}());
+var ZipBufferIterator = /*@__PURE__*/ (function (_super) {
+    __extends(ZipBufferIterator, _super);
+    function ZipBufferIterator(destination, parent, observable) {
+        var _this = _super.call(this, destination) || this;
+        _this.parent = parent;
+        _this.observable = observable;
+        _this.stillUnsubscribed = true;
+        _this.buffer = [];
+        _this.isComplete = false;
+        return _this;
+    }
+    ZipBufferIterator.prototype[iterator] = function () {
+        return this;
+    };
+    ZipBufferIterator.prototype.next = function () {
+        var buffer = this.buffer;
+        if (buffer.length === 0 && this.isComplete) {
+            return { value: null, done: true };
+        }
+        else {
+            return { value: buffer.shift(), done: false };
+        }
+    };
+    ZipBufferIterator.prototype.hasValue = function () {
+        return this.buffer.length > 0;
+    };
+    ZipBufferIterator.prototype.hasCompleted = function () {
+        return this.buffer.length === 0 && this.isComplete;
+    };
+    ZipBufferIterator.prototype.notifyComplete = function () {
+        if (this.buffer.length > 0) {
+            this.isComplete = true;
+            this.parent.notifyInactive();
+        }
+        else {
+            this.destination.complete();
+        }
+    };
+    ZipBufferIterator.prototype.notifyNext = function (outerValue, innerValue, outerIndex, innerIndex, innerSub) {
+        this.buffer.push(innerValue);
+        this.parent.checkIterators();
+    };
+    ZipBufferIterator.prototype.subscribe = function (value, index) {
+        return subscribeToResult(this, this.observable, this, index);
+    };
+    return ZipBufferIterator;
+}(OuterSubscriber));
 
 /**
  * Represents The Operations Of An Elevator
@@ -2084,54 +2335,137 @@ class ReactiveElevator extends Elevator {
             return array;
           }, [])
       ).subscribe((elevatorReponses) => {
-        elevatorReponses.forEach((arrayValue) => {
-          console.log('Elevator ' + this._id + 'recieved ID:' + arrayValue.elevatorID + ' Distance:' + arrayValue.distanceToFloor);
-        });
-
-        /* Find Minimum Distance */
-        const minDistance = elevatorReponses.reduce((previousVal, currentVal) => {
-         console.log('Cur' + currentVal.distanceToFloor + ' Prev:' + previousVal);
-          if (currentVal.distanceToFloor && currentVal.distanceToFloor <= previousVal) {
-            console.log('Replacing!');
-            return currentVal.distanceToFloor;
-          } else {
-            return previousVal;
-          }
-        }, 100000000000);
-
-        console.log('Elevator:' + this._id + ' Min Distance:' + minDistance);
-
-        /* If I Have The Minimum Possible Distance, I Could Potentially Respond */
-        if (minDistance === myDistanceToFloor) {
-          console.log('I Should Potentially Respond!');
-
-          /* Find All Responses Where Its Equal To My Distance.. All 'Competitor' Elevators */
-          const possibleResponseElevators = elevatorReponses.filter((val) => val.distance === myDistanceToFloor);
-
-          /* If Someone Else Has A Higher ID.. Don't Respond, Its Their Responsibility */
-          let shouldRespond = true;
-          possibleResponseElevators.forEach((val) => {
-            if (val.id > this._id) {
-              shouldRespond = false;
-            }
-          });
-
-          if (shouldRespond) {
-            console.log('Elevator:' + this._id + 'I have the highest ID, I should repsond');
-            this._respondingFloors.push(floorRequest.sourceFloor);
-          } else {
-            console.log('Elevator:' + this._id + 'Someone Else Has A Higher ID, I Dont Need To Respond');
-          }
+        if (this.determineResponseNecessary(elevatorReponses, myDistanceToFloor)) {
+          console.log('Elevator:' + this._id + 'I have the lowest ID, I should repsond');
+          this._respondingFloors.push(floorRequest.sourceFloor);
+          this._destinationFloors.push(floorRequest.destinationFloor);
+          /* Find The Next Floor We Need To Go To.. Either Source Or Destination */
+          const nextFloor = this._respondingFloors.concat(this._destinationFloors).sort()[0];
+          console.log('Elevator:' + this._id + 'Travelling To: ' + nextFloor);
+          this.traverseToFloor(nextFloor);
         } else {
-          console.log('I Dont Need To Respond');
+          console.log('Elevator:' + this._id + 'Someone Else Should Respond, I Dont Need To');
         }
-
-        
       });
 
       /* We'll Send Our Own Distance To The Other Elevators */
       const myResponse = new ElevatorResponse(this._id, this._trips, myDistanceToFloor);
       floorRequest.commSubject.next(myResponse);
+    });
+  }
+
+  /**
+   * Determine If I Should Respond To The Request
+   * @param {*} allDistances
+   * @param {*} myDistanceToFloor
+   * @return {boolean}
+   */
+  determineResponseNecessary(allDistances, myDistanceToFloor) {
+    let shouldRespond = true;
+
+    /* Find Minimum Distance */
+    const minDistance = allDistances.reduce((previousVal, currentVal) => {
+      if (currentVal.distanceToFloor && currentVal.distanceToFloor <= previousVal) {
+        return currentVal.distanceToFloor;
+      } else {
+        return previousVal;
+      }
+    }, 100000000000);
+
+    console.log('Elevator:' + this._id + ' Min Distance:' + minDistance);
+
+    /* If I Have The Minimum Possible Distance, I Could Potentially Respond */
+    if (minDistance === myDistanceToFloor) {
+      console.log('I Should Potentially Respond!');
+
+      /* Find All Responses Where Its Equal To My Distance.. All 'Competitor' Elevators */
+      const possibleResponseElevators = allDistances.filter((val) => val.distance === myDistanceToFloor);
+
+      /* If Someone Else Has A Higher ID.. Don't Respond, Its Their Responsibility */
+      possibleResponseElevators.forEach((val) => {
+        if (val.elevatorID > this._id) {
+          shouldRespond = false;
+        }
+      });
+    } else {
+      /* I Wasn't The Lowest.. No Need To Respond */
+      shouldRespond = false;
+    }
+    return shouldRespond;
+  }
+
+  /**
+   * Traverse From Current Foor To Target Floor
+   * Try To Add Some Time Between Floors, For Realism's Sake
+   * @param {int} targetFloor
+   */
+  traverseToFloor(targetFloor) {
+
+    super.traverseToFloor(targetFloor);
+    console.log('Elevator: ' + this._id + 'Traversing To Floor ' + targetFloor);
+
+
+    const floors = [];
+    for (let i = this._currentFloor+1; i <= targetFloor; i++) {
+      floors.push(i);
+    }
+
+    const floorsObs = zip(
+        from(floors),
+        timer(0, 1000),
+        (val, i) => val
+    );
+
+    floorsObs.subscribe((nextFloor) => {
+      /* Increment The Floor */
+      this._currentFloor++;
+
+      /* Announce We've Reached That Floor */
+      this.announceFloor();
+
+      /* Increment The Number Of Floors We've Reached */
+      this._floors++;
+
+      /* If We've Reached A Destination, Open The Doors, And Increment A Trip */
+      if (this._destinationFloors.includes(nextFloor) || this._respondingFloors.includes(nextFloor)) {
+        this.openDoors();
+        this._trips++;
+      }
+
+      /* This Isn't Necessairly Correct */
+      if (this._destinationFloors.includes(nextFloor)) {
+        console.log('This Is A Destination Floor');
+        this._occupied = false;
+        this._destinationFloors = this._destinationFloors.filter((floor) => {
+          return floor != nextFloor;
+        });
+      }
+
+      if (this._respondingFloors.includes(nextFloor)) {
+        console.log('This Is A Response Floor');
+        this._occupied = true;
+        this._respondingFloors = this._respondingFloors.filter((floor) => {
+          return floor != nextFloor;
+        });
+      }
+
+      /* If We've Hit The Target Floor, Find The Next Target */
+      if (nextFloor == targetFloor) {
+        console.log('We Hit Our Target Floor');
+        this._trips++;
+        console.log(this._respondingFloors.length);
+        console.log(this._destinationFloors.length);
+        console.log(this._respondingFloors.concat(this._destinationFloors).length);
+        /* Find The Next Floor We Need To Go To.. Either Source Or Destination */
+        const nextFloorAfterThis = this._respondingFloors.concat(this._destinationFloors).sort()[0];
+        console.log('Next Floor After This: ' + nextFloorAfterThis);
+
+
+        /* Allow This Method To Complete, And Start A New 'Thread' */
+        setTimeout(() => {
+          this.traverseToFloor(nextFloorAfterThis);
+        }, 0);
+      }
     });
   }
 }
@@ -2175,8 +2509,9 @@ class ElevatorRequest {
 
 const elevatorRequestSource = new Subject();
 
-const elevatorOne = new ReactiveElevator(elevatorRequestSource, 1, 5, 0);
-//const elevatorTwo = new ReactiveElevator(elevatorRequestSource, 2, 5, 4);
+const elevatorOne = new ReactiveElevator(elevatorRequestSource, 1, 5);
+const elevatorTwo = new ReactiveElevator(elevatorRequestSource, 2, 5);
+elevatorTwo.currentFloor = 4;
 
 const requestOne = new ElevatorRequest(1, 5);
 elevatorRequestSource.next(requestOne);

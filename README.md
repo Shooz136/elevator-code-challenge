@@ -15,8 +15,8 @@ These instructions will build and install a copy of the project on your local ma
 
 ### Prerequisites
 
-Node.js & Node Package Manager (NPM) - https://nodejs.org/en/download/
-Rollup installed globally - https://github.com/rollup/rollup
+Node.js & Node Package Manager (NPM) - https://nodejs.org/en/download/  
+Rollup installed globally - https://github.com/rollup/rollup  
 
 ### Installing
 
